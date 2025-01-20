@@ -1,5 +1,6 @@
 package com.example.serialcommunicationandroid
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -15,68 +16,84 @@ import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.example.serialcommunicationandroid.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
-    private  val ACTION_USB_PERMISSION = "com.android.example.USB_PERMISSION"
-    private  var usbDevice: UsbDevice ?= null
+    private lateinit var binding : ActivityMainBinding
+    private val ACTION_USB_PERMISSION = "com.android.example.USB_PERMISSION"
+    private var usbDevice: UsbDevice? = null
+    private lateinit var usbManager: UsbManager
+    private lateinit var usbReceiver: BroadcastReceiver
 
+    @SuppressLint("SetTextI18n")
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContentView(R.layout.activity_main)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
 
-        val usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
+        usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
 
-
-        val deviceList = usbManager.getDeviceList()
-
-        for (device in deviceList) {
-
+        // Retrieve connected USB devices
+        val deviceList = usbManager.deviceList
+        if (deviceList.isNotEmpty()) {
+            // Select the first device in the list
             usbDevice = deviceList.values.first()
-            Log.d("SerialDevice", "Found USB Device: ${usbDevice?.deviceName}")
-            val deviceManufacturer = device.value.manufacturerName
-            val deviceClass = device.value.deviceClass
-            val deviceSubclass = device.value.deviceSubclass
-            val deviceProtocol = device.value.deviceProtocol
-            val deviceVendorId = device.value.interfaceCount
-            val deviceProductId = device.value.productId
-            Log.d("SerialDevice", "Device: $deviceManufacturer $deviceClass $deviceSubclass $deviceProtocol $deviceVendorId $deviceProductId")
-        }
+            Log.d("SerialDevice", "Selected USB Device: ${usbDevice?.deviceName}")
+            binding.text.text = "Selected USB Device: ${usbDevice?.deviceName} \n"
+            // Prepare PendingIntent for permission request
+            val permissionIntent = PendingIntent.getBroadcast(
+                this, 0, Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_IMMUTABLE
+            )
 
-
-
-
-         val usbReceiver = object : BroadcastReceiver() {
-
-            override fun onReceive(context: Context, intent: Intent) {
-                if (ACTION_USB_PERMISSION == intent.action) {
-                    synchronized(this) {
-                        if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                            usbDevice?.apply {
-                                // call method to set up device communication
+            // Define the broadcast receiver
+            usbReceiver = object : BroadcastReceiver() {
+                override fun onReceive(context: Context, intent: Intent) {
+                    if (ACTION_USB_PERMISSION == intent.action) {
+                        synchronized(this) {
+                            val device: UsbDevice? = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+                            if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, true)) {
+                                device?.let {
+                                    Log.d("SerialDevice", "Permission granted for device: ${it.deviceName}")
+                                    binding.text.append("Permission granted for device: ${it.deviceName} \n")
+                                    // Initialize communication with the USB device here
+                                }
+                            } else {
+                                Log.d("SerialDevice", "Permission denied for device: $device")
+                                binding.text.append("Permission denied for device: $device \n")
                             }
-                        } else {
-                            Log.d("SerialDevice", "permission denied for device $usbDevice")
                         }
                     }
                 }
             }
+
+            // Register the receiver and request permission for the device
+            val filter = IntentFilter(ACTION_USB_PERMISSION)
+            registerReceiver(usbReceiver, filter, RECEIVER_EXPORTED)
+
+            usbDevice?.let {
+                usbManager.requestPermission(it, permissionIntent)
+            } ?: run {
+                Log.e("SerialDevice", "No valid USB device found to request permission.")
+                binding.text.append("No valid USB device found to request permission. \n")
+            }
+        } else {
+            Log.e("SerialDevice", "No USB devices connected.")
+            binding.text.append("No USB devices connected. \n")
         }
+    }
 
-        val permissionIntent = PendingIntent.getBroadcast(
-            this, 0,
-            Intent(ACTION_USB_PERMISSION), PendingIntent.FLAG_IMMUTABLE
-        )
-        val filter = IntentFilter(ACTION_USB_PERMISSION)
-        registerReceiver(usbReceiver, filter, RECEIVER_EXPORTED)
-
-        usbManager.requestPermission(usbDevice,permissionIntent)
-
+    override fun onDestroy() {
+        super.onDestroy()
+        if (::usbReceiver.isInitialized) {
+            unregisterReceiver(usbReceiver)
+        }
     }
 }
