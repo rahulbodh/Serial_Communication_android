@@ -39,6 +39,16 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
+        initUsb()
+
+        binding.retry.setOnClickListener {
+            initUsb()
+        }
+
+
+    }
+
+    private fun initUsb() {
         usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
 
         // Retrieve connected USB devices
